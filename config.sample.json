@@ -1,0 +1,9 @@
+{
+  "CLIENT_SECRET_FILE": "client_secret_aaaaaaaaaaaaaaaa.json",
+  "SERVICE_ACCOUNT_FILE": "eeefffggg.json",
+  "SCOPES": ["https://www.googleapis.com/auth/analytics.readonly"],
+  "TABLE_PREFIX": "backfill_v4_",
+  "PROPERTY_ID": "aaabbbccc",
+  "DATASET_ID": "analytics_aaabbbccc",
+  "INITIAL_FETCH_FROM_DATE": "2022-01-01"
+}
