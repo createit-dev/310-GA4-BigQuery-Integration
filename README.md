@@ -173,3 +173,11 @@ Table test_backfill_v4_20230801 created.
 Data saved to BigQuery for 08/2023!
 Data saved to BigQuery for 09/2023!
 ``` 
+
+### BigQuery preview
+
+After script execution - data will appear in BigQuery.
+
+![gC7nW7I06i.jpg](imgs%2FgC7nW7I06i.jpg)
+
+![nN0geT24M2.jpg](imgs%2FnN0geT24M2.jpg)
