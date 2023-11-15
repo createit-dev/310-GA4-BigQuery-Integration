@@ -13,6 +13,7 @@ import json
 import os
 import pickle
 from google_auth_oauthlib.flow import InstalledAppFlow
+from google.analytics.data_v1beta import OrderBy
 
 with open("config.json", "r") as f:
     config = json.load(f)
@@ -53,7 +54,7 @@ def exists_in_bigquery(event_name, event_date, event_count, channel_group, datas
     count = list(result)[0][0]
 
     if count > 0:
-        print(f"..record already exists in BigQuery ({count})")
+        print(f"..record already exists in BigQuery ({count})", flush=True)
 
     return count > 0
 
@@ -88,13 +89,13 @@ elif args.initial_fetch:
         start_date = INITIAL_FETCH_FROM_DATE
         end_date = datetime.date.today().strftime('%Y-%m-%d')
     else:
-        print("Exiting script due to user cancellation.")
+        print("Exiting script due to user cancellation.", flush=True)
         sys.exit()
 else:
-    print("No valid date range argument provided. Exiting script.")
+    print("No valid date range argument provided. Exiting script.", flush=True)
     sys.exit()
 
-print(f"Starting fetching data from {start_date} to {end_date}.")
+print(f"Starting fetching data from {start_date} to {end_date}.", flush=True)
 
 creds1 = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE,
@@ -120,15 +121,42 @@ with open('token.pickle', 'rb') as token:
 
 client = BetaAnalyticsDataClient(credentials=creds)
 
+def run_report_with_pagination(client, request):
+    all_rows = []
+    offset = 0  # Initialize offset
+    limit = 10000  # Set limit (maximum rows per request)
+
+    while True:
+        # Apply offset and limit to request
+        request.offset = offset
+        request.limit = limit
+
+        response = client.run_report(request)
+        all_rows.extend(response.rows)
+
+        # Check if there are more rows to fetch
+        if len(response.rows) == limit:
+            offset += limit  # Increase offset for the next iteration
+        else:
+            break  # No more rows left, exit loop
+
+    return all_rows
+
+
 request_active_users = RunReportRequest(
-    property=f'properties/{PROPERTY_ID}',
+  property=f'properties/{PROPERTY_ID}',
     date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
-    dimensions=[Dimension(name='date')],
-    metrics=[Metric(name='activeUsers')],
-    dimension_filter=None
+    dimensions=[
+        Dimension(name='date'),
+        Dimension(name='sessionDefaultChannelGroup')
+    ],
+    metrics=[Metric(name='sessions')],
+    order_bys=[OrderBy({"dimension": {"dimension_name": "date"}})]
 )
 
-response_active_users = client.run_report(request_active_users)
+active_users = run_report_with_pagination(client, request_active_users)
+sorted_active_users = active_users
+# sorted_active_users = sorted(active_users, key=lambda x: x.dimension_values[0].value)
 
 request_events = RunReportRequest(
     property=f'properties/{PROPERTY_ID}',
@@ -137,27 +165,25 @@ request_events = RunReportRequest(
     metrics=[Metric(name='eventCount')]
 )
 
-response_events = client.run_report(request_events)
-
-sorted_active_users = sorted(response_active_users.rows, key=lambda x: x.dimension_values[0].value)
-
-sorted_events = sorted(response_events.rows, key=lambda x: x.dimension_values[1].value)
+all_events = run_report_with_pagination(client, request_events)
+sorted_events = sorted(all_events, key=lambda x: x.dimension_values[1].value)
 
 rows_by_month = {}
 
 with open('output.csv', 'w', newline='', encoding='utf-8') as csvfile:
     csv_writer = csv.writer(csvfile)
 
-    csv_writer.writerow(['Event Name', 'Event Date', 'Event Count', 'Is Conversion', 'Channel'])
+    csv_writer.writerow(['Event Name', 'Event Date', 'Event Count', 'Is Conversion', 'Channel', 'Event_Type'])
 
     for row in sorted_active_users:
         event_name = "ct_active_users"
         is_conversion = None
         event_date = row.dimension_values[0].value
+        channel_group = row.dimension_values[1].value
         event_count = row.metric_values[0].value
-        channel_group = ''
+        event_type = "Traffic"
 
-        csv_writer.writerow([event_name, event_date, event_count, is_conversion, ''])
+        csv_writer.writerow([event_name, event_date, event_count, is_conversion, channel_group, event_type])
 
         if args.yesterday and exists_in_bigquery(event_name, event_date, event_count, channel_group, DATASET_ID, bq_client):
 
@@ -176,7 +202,8 @@ with open('output.csv', 'w', newline='', encoding='utf-8') as csvfile:
                 "Event_Date": event_date,
                 "Event_Count": event_count,
                 "Is_Conversion": is_conversion,
-                "Channel": channel_group
+                "Channel": channel_group,
+                "Event_Type" : event_type
             })
 
     for row in sorted_events:
@@ -192,39 +219,40 @@ with open('output.csv', 'w', newline='', encoding='utf-8') as csvfile:
 
         is_conversion = bool(is_conversion)
 
-        if is_conversion:
-            csv_writer.writerow([event_name, event_date, event_count, is_conversion, channel_group])
+        # Assign a value to event_type based on is_conversion
+        event_type = "Conversion" if is_conversion else "Event"
 
-        if is_conversion:
-           if args.yesterday and exists_in_bigquery(event_name, event_date, event_count, channel_group, DATASET_ID, bq_client):
+        csv_writer.writerow([event_name, event_date, event_count, is_conversion, channel_group, event_type])
 
-               pass
-           else:
-                is_conversion = bool(is_conversion)
+        if args.yesterday and exists_in_bigquery(event_name, event_date, event_count, channel_group, DATASET_ID, bq_client):
+            pass
+        else:
+            year = event_date[:4]
+            month = event_date[4:6]
+            key = (year, month)
 
-                year = event_date[:4]
-                month = event_date[4:6]
-                key = (year, month)
+            if key not in rows_by_month:
+                rows_by_month[key] = []
 
-                if key not in rows_by_month:
-                    rows_by_month[key] = []
+            rows_by_month[key].append({
+                "Event_Name": event_name,
+                "Event_Date": event_date,
+                "Event_Count": event_count,
+                "Is_Conversion": is_conversion,
+                "Channel": channel_group,
+                "Event_Type": event_type
+            })
 
-                rows_by_month[key].append({
-                    "Event_Name": event_name,
-                    "Event_Date": event_date,
-                    "Event_Count": event_count,
-                    "Is_Conversion": is_conversion,
-                    "Channel": channel_group
-                })
 
-print("Data saved to output.csv!")
+print("Data saved to output.csv!", flush=True)
 
 schema = [
     bigquery.SchemaField("Event_Name", "STRING", mode="NULLABLE"),
     bigquery.SchemaField("Event_Date", "INTEGER", mode="NULLABLE"),
     bigquery.SchemaField("Event_Count", "INTEGER", mode="NULLABLE"),
     bigquery.SchemaField("Is_Conversion", "BOOLEAN", mode="NULLABLE"),
-    bigquery.SchemaField("Channel", "STRING", mode="NULLABLE")
+    bigquery.SchemaField("Channel", "STRING", mode="NULLABLE"),
+    bigquery.SchemaField("Event_Type", "STRING", mode="NULLABLE")
 ]
 
 for (year, month), rows_to_insert in rows_by_month.items():
@@ -236,10 +264,10 @@ for (year, month), rows_to_insert in rows_by_month.items():
 
         table = bigquery.Table(table_ref, schema=schema)
         bq_client.create_table(table)
-        print(f"Table {table.table_id} created.")
+        print(f"Table {table.table_id} created.", flush=True)
 
     errors = bq_client.insert_rows(table_ref, rows_to_insert, selected_fields=schema)
     if errors:
-        print("Errors:", errors)
+        print("Errors:", errors, flush=True)
     else:
-        print(f"Data saved to BigQuery for {month}/{year}!")
+        print(f"Data saved to BigQuery for {month}/{year}!", flush=True)

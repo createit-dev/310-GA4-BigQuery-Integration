@@ -8,7 +8,8 @@ This Python script fetches data from GA4 and then saved it with Google's BigQuer
 2. Provides options to fetch data from yesterday or from a wider initial date range.
 3. Checks and prevents data duplication in BigQuery.
 4. Supports dynamic table creation in BigQuery based on data date.
-5. Outputs fetched data to `output.csv`.
+5. Use `run_report_with_pagination` to handle GA4's 10,000 row limit per API request
+6. Outputs fetched data to `output.csv`.
 
 ### Requirements:
 
@@ -173,6 +174,17 @@ Table test_backfill_v4_20230801 created.
 Data saved to BigQuery for 08/2023!
 Data saved to BigQuery for 09/2023!
 ``` 
+
+### Changelog
+
+#### Version 0.2
+- Introduced `run_report_with_pagination` function to address the Google Analytics 4 API constraint that fetches a maximum of 10,000 rows per request. This enhancement ensures complete data retrieval by systematically iterating through paginated data sets.
+- Added `event_type = "Traffic"` column for enriched data categorization.
+- Replaced `activeUsers` metrics with `sessionDefaultChannelGroup` for more accurate session channel grouping.
+- Sorted events by date to facilitate easier data analysis and reporting.
+
+#### Version 0.1
+- Initial release
 
 ### BigQuery preview
 
