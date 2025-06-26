@@ -193,3 +193,5 @@ After script execution - data will appear in BigQuery.
 ![gC7nW7I06i.jpg](imgs%2FgC7nW7I06i.jpg)
 
 ![nN0geT24M2.jpg](imgs%2FnN0geT24M2.jpg)
+
+Read more on our site: https://www.createit.com/blog/ga4-data-extraction-to-bigquery/
